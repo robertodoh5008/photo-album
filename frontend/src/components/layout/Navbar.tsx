@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
+import SignInModal from "@/components/auth/SignInModal";
 
 export function Navbar() {
   const { user, loading, signOut } = useAuth();
@@ -44,15 +46,34 @@ export function Navbar() {
             </>
           )}
           {!loading && !user && (
-            <Link
-              href="/login"
-              className="px-5 py-2 rounded-full bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-colors"
-            >
-              Sign In
-            </Link>
+            <>
+              <SignInButton />
+              <Link
+                href="/login?tab=register"
+                className="px-5 py-2 rounded-full border-2 border-purple-600 text-purple-600 text-sm font-semibold hover:bg-purple-50 transition-colors"
+              >
+                Register
+              </Link>
+            </>
           )}
         </div>
       </div>
     </nav>
+  );
+}
+
+function SignInButton() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="px-5 py-2 rounded-full bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 transition-colors"
+      >
+        Sign In
+      </button>
+      {open && <SignInModal onClose={() => setOpen(false)} />}
+    </>
   );
 }

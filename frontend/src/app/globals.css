@@ -27,3 +27,41 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Ensure interactive elements show a pointer cursor on hover
+   and a "grabbing" cursor while active (click/press) for clear affordance. */
+button,
+a,
+input[type="button"],
+input[type="submit"],
+[role="button"],
+.btn,
+.clickable {
+  cursor: default;
+}
+
+button:hover,
+a:hover,
+input[type="button"]:hover,
+input[type="submit"]:hover,
+[role="button"]:hover,
+.btn:hover,
+.clickable:hover {
+  cursor: pointer;
+}
+
+button:active,
+a:active,
+input[type="button"]:active,
+input[type="submit"]:active,
+[role="button"]:active,
+.btn:active,
+.clickable:active {
+  cursor: grabbing;
+}
+
+/* Prevent cursor overrides on disabled controls */
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
