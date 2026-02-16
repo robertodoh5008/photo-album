@@ -63,7 +63,7 @@ export default function SignInModal({ onClose }: Props) {
 		};
 	}, [onClose]);
 
-	const signInWithProvider = async (provider: "google" | "facebook") => {
+	const signInWithProvider = async (provider: "google") => {
 		try {
 			setLoadingProvider(provider);
 			await supabase.auth.signInWithOAuth({
@@ -115,15 +115,6 @@ export default function SignInModal({ onClose }: Props) {
 						<img src="/images/google.svg" alt="Google" className="h-5 w-5" />
 						<span className="flex-1 text-gray-700">Continue with Google</span>
 						{loadingProvider === "google" && <span className="text-sm text-gray-500">...</span>}
-					</button>
-
-					<button
-						onClick={() => signInWithProvider("facebook")}
-						className="w-full flex items-center gap-3 px-4 py-3 rounded-full border border-gray-200 hover:bg-gray-50"
-					>
-						<img src="/images/facebook.svg" alt="Facebook" className="h-5 w-5" />
-						<span className="flex-1 text-gray-700">Continue with Facebook</span>
-						{loadingProvider === "facebook" && <span className="text-sm text-gray-500">...</span>}
 					</button>
 
 					<button
