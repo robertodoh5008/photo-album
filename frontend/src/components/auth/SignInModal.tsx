@@ -66,7 +66,12 @@ export default function SignInModal({ onClose }: Props) {
 	const signInWithProvider = async (provider: "google" | "facebook" | "apple") => {
 		try {
 			setLoadingProvider(provider);
-			await supabase.auth.signInWithOAuth({ provider });
+			await supabase.auth.signInWithOAuth({
+				provider,
+				options: {
+					redirectTo: `${window.location.origin}/auth/callback`,
+				},
+			});
 		} catch (err) {
 			console.error("OAuth sign-in error", err);
 		} finally {
