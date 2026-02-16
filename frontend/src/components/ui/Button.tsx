@@ -12,7 +12,7 @@ const variants = {
   primary:
     "bg-purple-600 text-white hover:bg-purple-700 shadow-sm",
   secondary:
-    "bg-white text-purple-600 border-2 border-purple-600 hover:bg-purple-600 hover:text-white cursor-pointer",
+    "bg-white text-purple-600 border-2 border-purple-600 hover:bg-purple-600 hover:text-white",
   ghost:
     "text-purple-600 hover:bg-purple-50",
 };

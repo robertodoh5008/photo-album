@@ -30,7 +30,7 @@ export function HeroSection() {
           <div className="mt-10 flex flex-col sm:flex-row gap-4">
             <button
               onClick={() => setShowModal(true)}
-              className="inline-flex items-center justify-center rounded-full font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-white text-purple-700 hover:bg-purple-50 shadow-lg px-8 py-4 text-lg"
+              className="inline-flex items-center justify-center rounded-full font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-white text-purple-700 hover:bg-purple-600 hover:text-white active:bg-purple-700 active:text-white shadow-lg px-8 py-4 text-lg"
             >
               Start Sharing Memories
             </button>
