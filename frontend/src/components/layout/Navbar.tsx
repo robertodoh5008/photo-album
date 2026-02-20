@@ -3,46 +3,25 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useRouter } from "next/navigation";
 import SignInModal from "@/components/auth/SignInModal";
+import NotificationsPopover from "@/components/layout/NotificationsPopover";
+import ProfileDropdown from "@/components/layout/ProfileDropdown";
 
 export function Navbar() {
-  const { user, loading, signOut } = useAuth();
-  const router = useRouter();
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/");
-  };
+  const { user, loading } = useAuth();
 
   return (
     <nav className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-purple-100">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <Link href="/" className="text-xl font-bold text-purple-700">
+        <Link href={user ? "/gallery" : "/"} className="text-xl font-bold text-purple-700">
           Family Album
         </Link>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {!loading && user && (
             <>
-              <Link
-                href="/gallery"
-                className="text-sm font-medium text-gray-600 hover:text-purple-600 transition-colors"
-              >
-                Gallery
-              </Link>
-              <Link
-                href="/upload"
-                className="text-sm font-medium text-gray-600 hover:text-purple-600 transition-colors"
-              >
-                Upload
-              </Link>
-              <button
-                onClick={handleSignOut}
-                className="text-sm font-medium text-gray-500 hover:text-red-500 transition-colors"
-              >
-                Sign Out
-              </button>
+              <NotificationsPopover />
+              <ProfileDropdown />
             </>
           )}
           {!loading && !user && (

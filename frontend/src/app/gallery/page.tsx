@@ -2,33 +2,55 @@
 
 import { useState } from "react";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
-import { FilterBar } from "@/components/ui/FilterBar";
-import { MediaGrid } from "@/components/media/MediaGrid";
-import { useMedia } from "@/hooks/useMedia";
-import { MediaFilter, MediaItem } from "@/types";
-import { apiFetch } from "@/lib/api";
+import { useAlbums } from "@/hooks/useAlbums";
+import { SortOption } from "@/types";
+import AlbumOverviewToolbar from "@/components/albums/AlbumOverviewToolbar";
+import OverviewGrid from "@/components/albums/OverviewGrid";
+import CreateAlbumModal from "@/components/albums/CreateAlbumModal";
+import CreateFolderModal from "@/components/albums/CreateFolderModal";
 
 export default function GalleryPage() {
-  const [filter, setFilter] = useState<MediaFilter>("all");
-  const { media, loading, error, refetch } = useMedia(filter);
+  const [sortBy, setSortBy] = useState<SortOption>("date");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [showCreateAlbum, setShowCreateAlbum] = useState(false);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
 
-  const handleDelete = async (item: MediaItem) => {
-    if (!confirm("Delete this media? This cannot be undone.")) return;
-    try {
-      await apiFetch(`/media/${item.id}`, { method: "DELETE" });
-      refetch();
-    } catch {
-      alert("Failed to delete media.");
-    }
+  const { albums, folders, loading, error, refetch } = useAlbums(currentFolderId, sortBy);
+
+  const handleFolderClick = (folderId: string) => {
+    setCurrentFolderId(folderId);
+  };
+
+  const handleBack = () => {
+    setCurrentFolderId(null);
   };
 
   return (
     <ProtectedRoute>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Your Gallery</h1>
-          <FilterBar activeFilter={filter} onFilterChange={setFilter} />
-        </div>
+        {currentFolderId && (
+          <button
+            onClick={handleBack}
+            className="flex items-center gap-1 text-sm text-purple-600 hover:text-purple-700 mb-4"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            Back to overview
+          </button>
+        )}
+
+        <h1 className="text-3xl font-bold text-gray-900 mb-6">Album overview</h1>
+
+        <AlbumOverviewToolbar
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onNewAlbum={() => setShowCreateAlbum(true)}
+          onNewFolder={() => setShowCreateFolder(true)}
+        />
 
         {loading && (
           <div className="flex items-center justify-center py-20">
@@ -49,7 +71,27 @@ export default function GalleryPage() {
         )}
 
         {!loading && !error && (
-          <MediaGrid items={media} onDelete={handleDelete} />
+          <OverviewGrid
+            folders={folders}
+            albums={albums}
+            searchQuery={searchQuery}
+            onFolderClick={handleFolderClick}
+          />
+        )}
+
+        {showCreateAlbum && (
+          <CreateAlbumModal
+            folderId={currentFolderId}
+            onClose={() => setShowCreateAlbum(false)}
+            onCreated={refetch}
+          />
+        )}
+        {showCreateFolder && (
+          <CreateFolderModal
+            parentFolderId={currentFolderId}
+            onClose={() => setShowCreateFolder(false)}
+            onCreated={refetch}
+          />
         )}
       </div>
     </ProtectedRoute>

@@ -31,10 +31,21 @@ class SupabaseDB:
         params = {"select": "*"}
         if filters:
             for key, val in filters.items():
-                params[key] = f"eq.{val}"
+                if val is None:
+                    params[key] = "is.null"
+                else:
+                    params[key] = f"eq.{val}"
         if order:
             params["order"] = order
         resp = self._client.get(f"/{table}", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    def update(self, table: str, values: dict, filters: dict) -> list[dict]:
+        params = {}
+        for key, val in filters.items():
+            params[key] = f"eq.{val}"
+        resp = self._client.patch(f"/{table}", json=values, params=params)
         resp.raise_for_status()
         return resp.json()
 
