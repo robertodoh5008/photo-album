@@ -4,10 +4,14 @@ import { useState } from "react";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAlbums } from "@/hooks/useAlbums";
 import { SortOption } from "@/types";
+import { apiFetch } from "@/lib/api";
 import AlbumOverviewToolbar from "@/components/albums/AlbumOverviewToolbar";
 import OverviewGrid from "@/components/albums/OverviewGrid";
 import CreateAlbumModal from "@/components/albums/CreateAlbumModal";
 import CreateFolderModal from "@/components/albums/CreateFolderModal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import AlbumTile from "@/components/albums/AlbumTile";
+import { useSharedAlbums } from "@/hooks/useSharedAlbums";
 
 export default function GalleryPage() {
   const [sortBy, setSortBy] = useState<SortOption>("date");
@@ -15,8 +19,10 @@ export default function GalleryPage() {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [showCreateAlbum, setShowCreateAlbum] = useState(false);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "album" | "folder"; id: string; name: string } | null>(null);
 
   const { albums, folders, loading, error, refetch } = useAlbums(currentFolderId, sortBy);
+  const { albums: sharedAlbums, loading: sharedLoading } = useSharedAlbums();
 
   const handleFolderClick = (folderId: string) => {
     setCurrentFolderId(folderId);
@@ -24,6 +30,28 @@ export default function GalleryPage() {
 
   const handleBack = () => {
     setCurrentFolderId(null);
+  };
+
+  const handleDeleteAlbum = (albumId: string) => {
+    const album = albums.find((a) => a.id === albumId);
+    setDeleteTarget({ type: "album", id: albumId, name: album?.name || "this album" });
+  };
+
+  const handleDeleteFolder = (folderId: string) => {
+    const folder = folders.find((f) => f.id === folderId);
+    setDeleteTarget({ type: "folder", id: folderId, name: folder?.name || "this folder" });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      const endpoint = deleteTarget.type === "album" ? `/albums/${deleteTarget.id}` : `/folders/${deleteTarget.id}`;
+      await apiFetch(endpoint, { method: "DELETE" });
+      refetch();
+    } catch {
+      alert(`Failed to delete ${deleteTarget.type}.`);
+    }
+    setDeleteTarget(null);
   };
 
   return (
@@ -76,6 +104,8 @@ export default function GalleryPage() {
             albums={albums}
             searchQuery={searchQuery}
             onFolderClick={handleFolderClick}
+            onDeleteAlbum={handleDeleteAlbum}
+            onDeleteFolder={handleDeleteFolder}
           />
         )}
 
@@ -91,6 +121,35 @@ export default function GalleryPage() {
             parentFolderId={currentFolderId}
             onClose={() => setShowCreateFolder(false)}
             onCreated={refetch}
+          />
+        )}
+
+        {/* Shared with me */}
+        {!sharedLoading && sharedAlbums.length > 0 && (
+          <div className="mt-10">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">Shared with me</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {sharedAlbums.map((album) => (
+                <AlbumTile
+                  key={album.id}
+                  album={album}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {deleteTarget && (
+          <ConfirmDialog
+            title={`Delete ${deleteTarget.type}`}
+            message={
+              deleteTarget.type === "album"
+                ? `Delete "${deleteTarget.name}"? All photos and videos in this album will also be deleted.`
+                : `Delete "${deleteTarget.name}"?`
+            }
+            confirmLabel="Delete"
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteTarget(null)}
           />
         )}
       </div>

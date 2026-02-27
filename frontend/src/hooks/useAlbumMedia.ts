@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { MediaItem } from "@/types";
+import { Album, MediaItem } from "@/types";
 import { apiFetch } from "@/lib/api";
 
 export function useAlbumMedia(albumId: string) {
   const [media, setMedia] = useState<MediaItem[]>([]);
+  const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,8 +14,12 @@ export function useAlbumMedia(albumId: string) {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<MediaItem[]>(`/albums/${albumId}/media`);
+      const [data, albumData] = await Promise.all([
+        apiFetch<MediaItem[]>(`/albums/${albumId}/media`),
+        apiFetch<Album>(`/albums/${albumId}`),
+      ]);
       setMedia(data);
+      setAlbum(albumData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load album media");
     } finally {
@@ -41,5 +46,14 @@ export function useAlbumMedia(albumId: string) {
     await fetchMedia();
   };
 
-  return { media, loading, error, refetch: fetchMedia, addMedia, removeMedia };
+  return {
+    media,
+    album,
+    albumName: album?.name ?? null,
+    loading,
+    error,
+    refetch: fetchMedia,
+    addMedia,
+    removeMedia,
+  };
 }

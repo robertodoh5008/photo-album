@@ -75,6 +75,60 @@ cd frontend && npm run lint && npm run build
 | POST | /media | Yes | Save media metadata after S3 upload |
 | GET | /media | Yes | List user's media (optional ?type=image\|video) |
 | DELETE | /media/{id} | Yes | Delete media by ID (S3 + DB) |
+| GET | /albums | Yes | List own albums |
+| POST | /albums | Yes | Create album |
+| GET | /albums/shared | Yes | List albums shared with current user |
+| GET | /albums/{id} | Yes | Get album (owner or collaborator) |
+| PATCH | /albums/{id} | Yes | Update album metadata (owner only) |
+| DELETE | /albums/{id} | Yes | Delete album (owner only) |
+| POST | /albums/{id}/share | Yes | Set visibility public/private (owner only) |
+| GET | /albums/{id}/collaborators | Yes | List collaborators (owner only) |
+| PATCH | /albums/{id}/collaborators/{user_id} | Yes | Change collaborator role (owner only) |
+| DELETE | /albums/{id}/collaborators/{user_id} | Yes | Remove collaborator (owner only) |
+| GET | /albums/{id}/invites | Yes | List pending invites (owner only) |
+| POST | /albums/{id}/invites | Yes | Create invite link (owner only) |
+| POST | /albums/{id}/invites/{invite_id}/revoke | Yes | Revoke invite (owner only) |
+| GET | /albums/{id}/media | Yes | List album media (owner + collaborators) |
+| POST | /albums/{id}/media | Yes | Add media to album (owner + contributors) |
+| DELETE | /albums/{id}/media/{media_id} | Yes | Remove media from album (owner only) |
+| POST | /invites/{token}/accept | Yes | Accept invite, become collaborator |
+| GET | /public/albums/{id} | No | Get public album (visibility=public only) |
+| GET | /public/albums/{id}/media | No | List public album media |
+| GET | /public/invites/{token} | No | Preview invite info (no email exposed) |
+
+## Sharing & Invites
+
+### Overview
+Albums have a `visibility` field: `'private'` (default) or `'public'`.
+
+- **Public albums**: viewable at `/share/{id}` without signing in.
+- **Private albums**: only accessible to the owner + collaborators (via invite).
+- **Collaborators** have a role: `viewer` (read-only) or `contributor` (can add media).
+- **Invites** are token-based links (`/invite/{token}`) that expire in 7 days.
+
+### Setup
+Run migration `004_album_sharing.sql` in the Supabase SQL editor before starting:
+```sql
+-- Run the contents of supabase/migrations/004_album_sharing.sql
+```
+
+### Invite Flow
+1. Album owner opens the Share modal → enters an email + role → clicks Invite.
+2. Backend creates a row in `album_invites` with a UUID token.
+3. The modal shows the invite link: `{FRONTEND_URL}/invite/{token}`.
+4. Owner copies and sends the link (e.g., via WhatsApp/email).
+5. Invitee opens the link → sees album name + role preview → clicks "Accept invite".
+6. If not logged in: redirected to `/login?redirectTo=/invite/{token}` and back after auth.
+7. On accept: a row is inserted in `album_collaborators` and invite status → `accepted`.
+8. The album now appears in the invitee's Gallery under "Shared with me".
+
+### Permissions Summary
+| Action | Owner | Contributor | Viewer | Public |
+|--------|-------|-------------|--------|--------|
+| View album & media | ✓ | ✓ | ✓ | ✓ |
+| Add media | ✓ | ✓ | ✗ | ✗ |
+| Remove media | ✓ | ✗ | ✗ | ✗ |
+| Manage sharing | ✓ | ✗ | ✗ | ✗ |
 
 ## Database Schema
 

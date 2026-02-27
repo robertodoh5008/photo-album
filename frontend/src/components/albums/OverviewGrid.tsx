@@ -9,6 +9,8 @@ interface OverviewGridProps {
   albums: Album[];
   searchQuery: string;
   onFolderClick: (folderId: string) => void;
+  onDeleteAlbum?: (albumId: string) => void;
+  onDeleteFolder?: (folderId: string) => void;
 }
 
 export default function OverviewGrid({
@@ -16,6 +18,8 @@ export default function OverviewGrid({
   albums,
   searchQuery,
   onFolderClick,
+  onDeleteAlbum,
+  onDeleteFolder,
 }: OverviewGridProps) {
   const q = searchQuery.toLowerCase();
   const filteredFolders = q
@@ -37,10 +41,19 @@ export default function OverviewGrid({
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
       {filteredFolders.map((folder) => (
-        <FolderTile key={folder.id} folder={folder} onClick={onFolderClick} />
+        <FolderTile
+          key={folder.id}
+          folder={folder}
+          onClick={onFolderClick}
+          onDelete={onDeleteFolder}
+        />
       ))}
       {filteredAlbums.map((album) => (
-        <AlbumTile key={album.id} album={album} />
+        <AlbumTile
+          key={album.id}
+          album={album}
+          onDelete={onDeleteAlbum}
+        />
       ))}
     </div>
   );

@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
 
-export function UploadForm() {
+interface UploadFormProps {
+  albumId?: string | null;
+}
+
+export function UploadForm({ albumId }: UploadFormProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -67,7 +71,7 @@ export function UploadForm() {
         }
 
         // Step 3: Save metadata to backend
-        await apiFetch("/media", {
+        const saved = await apiFetch<{ id: string }>("/media", {
           method: "POST",
           body: JSON.stringify({
             s3_key: presign.s3_key,
@@ -77,6 +81,14 @@ export function UploadForm() {
             content_type: file.type,
           }),
         });
+
+        // Step 4: If uploading to an album, add media to it
+        if (albumId) {
+          await apiFetch(`/albums/${albumId}/media`, {
+            method: "POST",
+            body: JSON.stringify({ media_ids: [saved.id] }),
+          });
+        }
       }
       setSuccess(true);
       setFiles([]);
@@ -161,10 +173,10 @@ export function UploadForm() {
         <div className="mt-4 text-green-600 text-sm bg-green-50 px-4 py-3 rounded-lg flex items-center justify-between">
           <span>Upload complete!</span>
           <button
-            onClick={() => router.push("/gallery")}
+            onClick={() => router.push(albumId ? `/albums/${albumId}` : "/gallery")}
             className="text-purple-600 font-medium hover:underline"
           >
-            View Gallery
+            {albumId ? "View Album" : "View Gallery"}
           </button>
         </div>
       )}

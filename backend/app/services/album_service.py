@@ -1,13 +1,133 @@
+from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import smtplib
 from fastapi import HTTPException, status
+import httpx
 
 from app.schemas.albums import (
     AlbumCreateRequest,
     AlbumMediaRequest,
     AlbumUpdateRequest,
     FolderCreateRequest,
+    InviteCreateRequest,
 )
-from app.utils.s3_client import generate_presigned_view_url
+from app.config import settings
+from app.utils.s3_client import generate_presigned_view_url, delete_s3_object
 from app.utils.supabase_client import SupabaseDB
+
+
+# ── Access control helper ─────────────────────────────────────────────
+
+def _check_album_access(user_id: str, album_id: str, supabase: SupabaseDB) -> tuple[dict, str]:
+    """Return (album, role) or raise HTTP 404/403.
+
+    role is one of: 'owner' | 'contributor' | 'viewer'
+    """
+    rows = supabase.select("albums", filters={"id": album_id})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    album = rows[0]
+
+    if album["user_id"] == user_id:
+        return album, "owner"
+
+    collabs = supabase.select(
+        "album_collaborators",
+        filters={"album_id": album_id, "user_id": user_id},
+    )
+    if collabs:
+        return album, collabs[0]["role"]  # 'viewer' | 'contributor'
+
+    if album.get("visibility") == "public":
+        return album, "viewer"
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+
+def _require_owner(user_id: str, album_id: str, supabase: SupabaseDB) -> dict:
+    """Return album dict or raise 403/404 if caller is not the owner."""
+    rows = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    return rows[0]
+
+
+def _get_user_email(user_id: str) -> str | None:
+    """Fetch user email from Supabase Auth admin API using service role key."""
+    try:
+        resp = httpx.get(
+            f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+            headers={
+                "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("email")
+    except Exception:
+        return None
+
+
+def _auto_accept_pending_invites(user_id: str, email: str, supabase: SupabaseDB) -> None:
+    """Accept any pending, unexpired album invites matching this user's email address."""
+    now = datetime.now(timezone.utc)
+    pending = supabase.select("album_invites", filters={"invited_email": email, "status": "pending"})
+    for invite in pending:
+        expires_at = datetime.fromisoformat(invite["expires_at"].replace("Z", "+00:00"))
+        if now > expires_at:
+            supabase.update("album_invites", values={"status": "expired"}, filters={"id": invite["id"]})
+            continue
+        album_id = invite["album_id"]
+        role = invite["role"]
+        existing = supabase.select("album_collaborators", filters={"album_id": album_id, "user_id": user_id})
+        if existing:
+            supabase.update(
+                "album_collaborators",
+                values={"role": role},
+                filters={"album_id": album_id, "user_id": user_id},
+            )
+        else:
+            supabase.insert("album_collaborators", {"album_id": album_id, "user_id": user_id, "role": role})
+        supabase.update("album_invites", values={"status": "accepted"}, filters={"id": invite["id"]})
+
+
+def _send_invite_email(to_email: str, album_name: str, invite_link: str, role: str) -> None:
+    """Send invite email via Gmail SMTP. Silently skips if SMTP_USER is not configured."""
+    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
+        return
+    try:
+        action = "view" if role == "viewer" else "view and upload photos to"
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"You've been invited to \"{album_name}\""
+        msg["From"] = settings.SMTP_USER
+        msg["To"] = to_email
+
+        text = (
+            f"You've been invited to {action} the album \"{album_name}\" on Family Album.\n\n"
+            f"Click the link below to accept your invitation:\n{invite_link}\n\n"
+            f"This invite expires in 7 days.\n"
+            f"If you were not expecting this invite, you can ignore this email."
+        )
+        html = (
+            f"<div style=\"font-family:sans-serif;max-width:480px;margin:auto;padding:32px\">"
+            f"<h2 style=\"color:#111\">You've been invited</h2>"
+            f"<p>You've been invited to {action} the album <strong>\"{album_name}\"</strong> on Family Album.</p>"
+            f"<p style=\"margin:32px 0\">"
+            f"<a href=\"{invite_link}\" style=\"background:#7c3aed;color:white;padding:14px 28px;border-radius:9999px;text-decoration:none;font-weight:600\">Accept Invite</a>"
+            f"</p>"
+            f"<p style=\"color:#6b7280;font-size:13px\">This invite expires in 7 days. If you were not expecting this, you can ignore this email.</p>"
+            f"</div>"
+        )
+        msg.attach(MIMEText(text, "plain"))
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.sendmail(settings.SMTP_USER, to_email, msg.as_string())
+    except Exception as e:
+        print(f"Email send failed (invite still created): {e}")
 
 
 # ── Folders ──────────────────────────────────────────────────────────
@@ -52,6 +172,7 @@ def create_album(user_id: str, data: AlbumCreateRequest, supabase: SupabaseDB) -
     record = result[0]
     record["cover_url"] = None
     record["media_count"] = 0
+    record["my_role"] = "owner"
     return record
 
 
@@ -71,17 +192,37 @@ def list_albums(
     for album in albums:
         album["cover_url"] = _get_cover_url(album, supabase)
         album["media_count"] = _get_media_count(album["id"], supabase)
+        album["my_role"] = "owner"
 
     return albums
 
 
+def list_shared_albums(user_id: str, supabase: SupabaseDB) -> list[dict]:
+    """Return albums the caller is a collaborator on (not owner).
+    Auto-accepts any pending email invites for this user on first call.
+    """
+    email = _get_user_email(user_id)
+    if email:
+        _auto_accept_pending_invites(user_id, email, supabase)
+
+    collabs = supabase.select("album_collaborators", filters={"user_id": user_id})
+    albums = []
+    for collab in collabs:
+        rows = supabase.select("albums", filters={"id": collab["album_id"]})
+        if rows:
+            album = rows[0]
+            album["cover_url"] = _get_cover_url(album, supabase)
+            album["media_count"] = _get_media_count(album["id"], supabase)
+            album["my_role"] = collab["role"]
+            albums.append(album)
+    return albums
+
+
 def get_album(user_id: str, album_id: str, supabase: SupabaseDB) -> dict:
-    items = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
-    if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
-    album = items[0]
+    album, role = _check_album_access(user_id, album_id, supabase)
     album["cover_url"] = _get_cover_url(album, supabase)
     album["media_count"] = _get_media_count(album["id"], supabase)
+    album["my_role"] = role
     return album
 
 
@@ -91,9 +232,7 @@ def update_album(
     data: AlbumUpdateRequest,
     supabase: SupabaseDB,
 ) -> dict:
-    items = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
-    if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    _require_owner(user_id, album_id, supabase)
 
     values = data.model_dump(exclude_none=True)
     if "folder_id" in values:
@@ -105,14 +244,206 @@ def update_album(
     record = result[0]
     record["cover_url"] = _get_cover_url(record, supabase)
     record["media_count"] = _get_media_count(album_id, supabase)
+    record["my_role"] = "owner"
     return record
 
 
 def delete_album(user_id: str, album_id: str, supabase: SupabaseDB) -> None:
-    items = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
-    if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    _require_owner(user_id, album_id, supabase)
+
+    # Delete all media linked to this album (S3 files + DB rows)
+    links = supabase.select("album_media", filters={"album_id": album_id})
+    for link in links:
+        media_rows = supabase.select("media", filters={"id": link["media_id"]})
+        if media_rows:
+            delete_s3_object(media_rows[0]["s3_key"])
+            supabase.delete("media", filters={"id": link["media_id"]})
+    supabase.delete("album_media", filters={"album_id": album_id})
     supabase.delete("albums", filters={"id": album_id})
+
+
+# ── Visibility / Sharing ─────────────────────────────────────────────
+
+def set_album_visibility(
+    user_id: str,
+    album_id: str,
+    visibility: str,
+    supabase: SupabaseDB,
+) -> dict:
+    if visibility not in ("public", "private"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="visibility must be 'public' or 'private'")
+    _require_owner(user_id, album_id, supabase)
+    result = supabase.update("albums", values={"visibility": visibility}, filters={"id": album_id})
+    record = result[0]
+    record["cover_url"] = _get_cover_url(record, supabase)
+    record["media_count"] = _get_media_count(album_id, supabase)
+    record["my_role"] = "owner"
+    return record
+
+
+# ── Collaborators ─────────────────────────────────────────────────────
+
+def list_collaborators(user_id: str, album_id: str, supabase: SupabaseDB) -> list[dict]:
+    _require_owner(user_id, album_id, supabase)
+    rows = supabase.select("album_collaborators", filters={"album_id": album_id}, order="created_at.asc")
+    for row in rows:
+        row["email"] = _get_user_email(row["user_id"])
+    return rows
+
+
+def update_collaborator_role(
+    user_id: str,
+    album_id: str,
+    target_user_id: str,
+    role: str,
+    supabase: SupabaseDB,
+) -> dict:
+    if role not in ("viewer", "contributor"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role must be 'viewer' or 'contributor'")
+    _require_owner(user_id, album_id, supabase)
+    rows = supabase.select("album_collaborators", filters={"album_id": album_id, "user_id": target_user_id})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collaborator not found")
+    result = supabase.update(
+        "album_collaborators",
+        values={"role": role},
+        filters={"album_id": album_id, "user_id": target_user_id},
+    )
+    return result[0]
+
+
+def remove_collaborator(
+    user_id: str,
+    album_id: str,
+    target_user_id: str,
+    supabase: SupabaseDB,
+) -> None:
+    _require_owner(user_id, album_id, supabase)
+    supabase.delete("album_collaborators", filters={"album_id": album_id, "user_id": target_user_id})
+
+
+# ── Invites ───────────────────────────────────────────────────────────
+
+def list_invites(user_id: str, album_id: str, supabase: SupabaseDB) -> list[dict]:
+    _require_owner(user_id, album_id, supabase)
+    invites = supabase.select("album_invites", filters={"album_id": album_id}, order="created_at.desc")
+    for inv in invites:
+        inv["invite_link"] = f"{settings.FRONTEND_URL}/invite/{inv['token']}"
+    return invites
+
+
+def create_invite(
+    user_id: str,
+    album_id: str,
+    data: InviteCreateRequest,
+    supabase: SupabaseDB,
+) -> dict:
+    if data.role not in ("viewer", "contributor"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role must be 'viewer' or 'contributor'")
+    album = _require_owner(user_id, album_id, supabase)
+
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    result = supabase.insert("album_invites", {
+        "album_id": album_id,
+        "invited_email": data.email,
+        "role": data.role,
+        "expires_at": expires_at,
+    })
+    invite = result[0]
+    invite_link = f"{settings.FRONTEND_URL}/invite/{invite['token']}"
+    invite["invite_link"] = invite_link
+
+    _send_invite_email(data.email, album["name"], invite_link, data.role)
+
+    return invite
+
+
+def revoke_invite(
+    user_id: str,
+    album_id: str,
+    invite_id: str,
+    supabase: SupabaseDB,
+) -> None:
+    _require_owner(user_id, album_id, supabase)
+    rows = supabase.select("album_invites", filters={"id": invite_id, "album_id": album_id})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    supabase.update("album_invites", values={"status": "revoked"}, filters={"id": invite_id})
+
+
+def get_invite_preview(token: str, supabase: SupabaseDB) -> dict:
+    """Public — returns album name + role without leaking invited_email."""
+    rows = supabase.select("album_invites", filters={"token": token})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    invite = rows[0]
+
+    # Check expiry
+    expires_at = datetime.fromisoformat(invite["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        return {
+            "album_id": invite["album_id"],
+            "album_name": "",
+            "role": invite["role"],
+            "status": "expired",
+            "expires_at": invite["expires_at"],
+        }
+
+    album_rows = supabase.select("albums", filters={"id": invite["album_id"]})
+    album_name = album_rows[0]["name"] if album_rows else "Album"
+
+    return {
+        "album_id": invite["album_id"],
+        "album_name": album_name,
+        "role": invite["role"],
+        "status": invite["status"],
+        "expires_at": invite["expires_at"],
+    }
+
+
+def accept_invite(user_id: str, token: str, supabase: SupabaseDB) -> dict:
+    rows = supabase.select("album_invites", filters={"token": token})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    invite = rows[0]
+
+    if invite["status"] == "revoked":
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has been revoked")
+    if invite["status"] == "accepted":
+        # Idempotent — return existing collaborator row
+        collab = supabase.select("album_collaborators", filters={"album_id": invite["album_id"], "user_id": user_id})
+        if collab:
+            return collab[0]
+        # Invite accepted but no collaborator row (edge case) — fall through to create one
+
+    expires_at = datetime.fromisoformat(invite["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has expired")
+
+    album_id = invite["album_id"]
+    role = invite["role"]
+
+    # Check if already a collaborator; if so, update role
+    existing = supabase.select("album_collaborators", filters={"album_id": album_id, "user_id": user_id})
+    if existing:
+        result = supabase.update(
+            "album_collaborators",
+            values={"role": role},
+            filters={"album_id": album_id, "user_id": user_id},
+        )
+        collab = result[0]
+    else:
+        result = supabase.insert("album_collaborators", {
+            "album_id": album_id,
+            "user_id": user_id,
+            "role": role,
+        })
+        collab = result[0]
+
+    # Mark invite accepted
+    supabase.update("album_invites", values={"status": "accepted"}, filters={"id": invite["id"]})
+
+    return collab
 
 
 # ── Album Media ──────────────────────────────────────────────────────
@@ -123,10 +454,9 @@ def add_media_to_album(
     data: AlbumMediaRequest,
     supabase: SupabaseDB,
 ) -> None:
-    # Verify album belongs to user
-    items = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
-    if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    album, role = _check_album_access(user_id, album_id, supabase)
+    if role == "viewer":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewers cannot add media")
 
     for media_id in data.media_ids:
         supabase.insert("album_media", {"album_id": album_id, "media_id": str(media_id)})
@@ -138,9 +468,7 @@ def remove_media_from_album(
     media_id: str,
     supabase: SupabaseDB,
 ) -> None:
-    items = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
-    if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    _require_owner(user_id, album_id, supabase)
     supabase.delete("album_media", filters={"album_id": album_id, "media_id": media_id})
 
 
@@ -149,9 +477,7 @@ def list_album_media(
     album_id: str,
     supabase: SupabaseDB,
 ) -> list[dict]:
-    items = supabase.select("albums", filters={"id": album_id, "user_id": user_id})
-    if not items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    _check_album_access(user_id, album_id, supabase)
 
     links = supabase.select("album_media", filters={"album_id": album_id}, order="added_at.desc")
     media_items = []
@@ -159,6 +485,35 @@ def list_album_media(
         rows = supabase.select("media", filters={"id": link["media_id"]})
         if rows:
             row = rows[0]
+            row["view_url"] = generate_presigned_view_url(row["s3_key"])
+            media_items.append(row)
+    return media_items
+
+
+# ── Public (no auth) ─────────────────────────────────────────────────
+
+def get_public_album(album_id: str, supabase: SupabaseDB) -> dict:
+    rows = supabase.select("albums", filters={"id": album_id})
+    if not rows or rows[0].get("visibility") != "public":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    album = rows[0]
+    album["cover_url"] = _get_cover_url(album, supabase)
+    album["media_count"] = _get_media_count(album["id"], supabase)
+    album["my_role"] = "viewer"
+    return album
+
+
+def list_public_album_media(album_id: str, supabase: SupabaseDB) -> list[dict]:
+    rows = supabase.select("albums", filters={"id": album_id})
+    if not rows or rows[0].get("visibility") != "public":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+
+    links = supabase.select("album_media", filters={"album_id": album_id}, order="added_at.desc")
+    media_items = []
+    for link in links:
+        media_rows = supabase.select("media", filters={"id": link["media_id"]})
+        if media_rows:
+            row = media_rows[0]
             row["view_url"] = generate_presigned_view_url(row["s3_key"])
             media_items.append(row)
     return media_items
