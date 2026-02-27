@@ -265,6 +265,12 @@ export default function ShareModal({
             <p className="text-xs text-gray-400 mt-1.5">
               Viewer can browse only. Contributor can also upload media.
             </p>
+            <div className="mt-2 flex items-start gap-1.5 text-xs text-purple-700 bg-purple-50 px-3 py-2 rounded-lg">
+              <svg className="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>After inviting, copy the link below and send it via iMessage, WhatsApp, or any app.</span>
+            </div>
           </div>
 
           {/* Pending invites */}
@@ -275,35 +281,42 @@ export default function ShareModal({
                 {invites.map((inv) => (
                   <li
                     key={inv.id}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50 text-sm"
+                    className="flex flex-col gap-2 px-3 py-3 rounded-lg bg-gray-50 text-sm"
                   >
-                    <span className="text-gray-700 truncate flex-1">{inv.invited_email}</span>
-                    <span className="ml-2 px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs capitalize shrink-0">
-                      {inv.role}
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-700 truncate flex-1">{inv.invited_email}</span>
+                      <span className="ml-2 px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-xs capitalize shrink-0">
+                        {inv.role}
+                      </span>
+                      <button
+                        onClick={() => handleRevokeInvite(inv.id)}
+                        className="ml-2 text-gray-400 hover:text-red-500 transition-colors shrink-0"
+                        title="Revoke invite"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                     <button
                       onClick={() => handleCopyInviteLink(inv)}
-                      className="ml-2 text-gray-400 hover:text-purple-600 transition-colors shrink-0"
-                      title="Copy invite link"
+                      className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-purple-200 bg-white text-purple-700 text-xs font-medium hover:bg-purple-50 transition-colors"
                     >
                       {copiedInviteId === inv.id ? (
-                        <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
+                        <>
+                          <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span className="text-green-600">Link copied!</span>
+                        </>
                       ) : (
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
+                        <>
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          <span>Copy invite link — send via iMessage or WhatsApp</span>
+                        </>
                       )}
-                    </button>
-                    <button
-                      onClick={() => handleRevokeInvite(inv.id)}
-                      className="ml-2 text-gray-400 hover:text-red-500 transition-colors shrink-0"
-                      title="Revoke invite"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
                     </button>
                   </li>
                 ))}
