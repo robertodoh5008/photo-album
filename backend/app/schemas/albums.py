@@ -96,3 +96,33 @@ class InvitePreviewResponse(BaseModel):
     role: str
     status: str
     expires_at: datetime
+
+
+# ── Family Members ────────────────────────────────────────────────────
+
+class FamilyInviteRequest(BaseModel):
+    email: EmailStr
+    role: str = "viewer"  # 'viewer' | 'contributor'
+
+
+class FamilyMemberResponse(BaseModel):
+    id: UUID
+    owner_id: UUID
+    member_id: Optional[UUID] = None
+    invited_email: str
+    email: Optional[str] = None   # resolved display email (from member_id lookup)
+    role: str
+    status: str
+    created_at: datetime
+    invite_link: Optional[str] = None
+
+
+class FamilyInvitePreview(BaseModel):
+    """Public-safe family invite info."""
+    owner_name: str
+    role: str
+    status: str
+
+
+class FamilyMemberUpdateRequest(BaseModel):
+    role: str  # 'viewer' | 'contributor'

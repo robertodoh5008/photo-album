@@ -72,3 +72,21 @@ export interface InvitePreview {
   status: string;
   expires_at: string;
 }
+
+export interface FamilyMember {
+  id: string;
+  owner_id: string;
+  member_id: string | null;
+  invited_email: string;
+  email: string | null;
+  role: "viewer" | "contributor";
+  status: "pending" | "accepted" | "revoked";
+  created_at: string;
+  invite_link?: string;
+}
+
+export interface FamilyInvitePreview {
+  owner_name: string;
+  role: string;
+  status: string;
+}

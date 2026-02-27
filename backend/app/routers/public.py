@@ -1,9 +1,10 @@
 """Public (unauthenticated) endpoints for shared albums and invite previews."""
 from fastapi import APIRouter
 
-from app.schemas.albums import AlbumResponse, InvitePreviewResponse
+from app.schemas.albums import AlbumResponse, FamilyInvitePreview, InvitePreviewResponse
 from app.schemas.media import MediaResponse
 from app.services.album_service import (
+    get_family_invite_preview,
     get_invite_preview,
     get_public_album,
     list_public_album_media,
@@ -29,3 +30,9 @@ def list_public_album_media_endpoint(album_id: str):
 def get_invite_preview_endpoint(token: str):
     supabase = get_supabase_admin()
     return get_invite_preview(token, supabase)
+
+
+@router.get("/family-invites/{token}", response_model=FamilyInvitePreview)
+def get_family_invite_preview_endpoint(token: str):
+    supabase = get_supabase_admin()
+    return get_family_invite_preview(token, supabase)

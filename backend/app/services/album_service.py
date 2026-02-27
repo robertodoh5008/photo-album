@@ -38,6 +38,14 @@ def _check_album_access(user_id: str, album_id: str, supabase: SupabaseDB) -> tu
     if collabs:
         return album, collabs[0]["role"]  # 'viewer' | 'contributor'
 
+    # Check family membership — gives access to all owner's albums
+    family = supabase.select(
+        "family_members",
+        filters={"owner_id": album["user_id"], "member_id": user_id, "status": "accepted"},
+    )
+    if family:
+        return album, family[0]["role"]
+
     if album.get("visibility") == "public":
         return album, "viewer"
 
@@ -70,8 +78,10 @@ def _get_user_email(user_id: str) -> str | None:
 
 
 def _auto_accept_pending_invites(user_id: str, email: str, supabase: SupabaseDB) -> None:
-    """Accept any pending, unexpired album invites matching this user's email address."""
+    """Accept any pending, unexpired album invites and family invites matching this user's email."""
     now = datetime.now(timezone.utc)
+
+    # Album invites
     pending = supabase.select("album_invites", filters={"invited_email": email, "status": "pending"})
     for invite in pending:
         expires_at = datetime.fromisoformat(invite["expires_at"].replace("Z", "+00:00"))
@@ -90,6 +100,15 @@ def _auto_accept_pending_invites(user_id: str, email: str, supabase: SupabaseDB)
         else:
             supabase.insert("album_collaborators", {"album_id": album_id, "user_id": user_id, "role": role})
         supabase.update("album_invites", values={"status": "accepted"}, filters={"id": invite["id"]})
+
+    # Family invites
+    pending_family = supabase.select("family_members", filters={"invited_email": email, "status": "pending"})
+    for fm in pending_family:
+        supabase.update(
+            "family_members",
+            values={"member_id": user_id, "status": "accepted"},
+            filters={"id": fm["id"]},
+        )
 
 
 def _send_invite_email(to_email: str, album_name: str, invite_link: str, role: str) -> None:
@@ -192,15 +211,18 @@ def list_albums(
 
 
 def list_shared_albums(user_id: str, supabase: SupabaseDB) -> list[dict]:
-    """Return albums the caller is a collaborator on (not owner).
-    Auto-accepts any pending email invites for this user on first call.
+    """Return albums the caller can access as a collaborator or family member (not as owner).
+    Auto-accepts any pending email invites and family invites on first call.
     """
     email = _get_user_email(user_id)
     if email:
         _auto_accept_pending_invites(user_id, email, supabase)
 
+    added_ids: set[str] = set()
+    albums: list[dict] = []
+
+    # Album-level collaborators
     collabs = supabase.select("album_collaborators", filters={"user_id": user_id})
-    albums = []
     for collab in collabs:
         rows = supabase.select("albums", filters={"id": collab["album_id"]})
         if rows:
@@ -208,7 +230,21 @@ def list_shared_albums(user_id: str, supabase: SupabaseDB) -> list[dict]:
             album["cover_url"] = _get_cover_url(album, supabase)
             album["media_count"] = _get_media_count(album["id"], supabase)
             album["my_role"] = collab["role"]
+            added_ids.add(album["id"])
             albums.append(album)
+
+    # Family members — get all albums belonging to the owner
+    family_rows = supabase.select("family_members", filters={"member_id": user_id, "status": "accepted"})
+    for fm in family_rows:
+        owner_albums = supabase.select("albums", filters={"user_id": fm["owner_id"]})
+        for album in owner_albums:
+            if album["id"] not in added_ids:
+                album["cover_url"] = _get_cover_url(album, supabase)
+                album["media_count"] = _get_media_count(album["id"], supabase)
+                album["my_role"] = fm["role"]
+                added_ids.add(album["id"])
+                albums.append(album)
+
     return albums
 
 
@@ -515,6 +551,106 @@ def list_public_album_media(album_id: str, supabase: SupabaseDB) -> list[dict]:
             row["view_url"] = generate_presigned_view_url(row["s3_key"])
             media_items.append(row)
     return media_items
+
+
+# ── Family Members ───────────────────────────────────────────────────
+
+def list_family_members(user_id: str, supabase: SupabaseDB) -> list[dict]:
+    rows = supabase.select("family_members", filters={"owner_id": user_id}, order="created_at.desc")
+    for row in rows:
+        if row.get("member_id"):
+            row["email"] = _get_user_email(row["member_id"])
+        else:
+            row["email"] = None
+        row["invite_link"] = f"{settings.FRONTEND_URL}/family-invite/{row['token']}"
+    return rows
+
+
+def invite_family_member(
+    user_id: str,
+    email: str,
+    role: str,
+    supabase: SupabaseDB,
+) -> dict:
+    if role not in ("viewer", "contributor"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role must be 'viewer' or 'contributor'")
+    result = supabase.insert("family_members", {
+        "owner_id": user_id,
+        "invited_email": email,
+        "role": role,
+    })
+    row = result[0]
+    invite_link = f"{settings.FRONTEND_URL}/family-invite/{row['token']}"
+    row["invite_link"] = invite_link
+    row["email"] = None
+
+    # Get owner name for the email (best-effort)
+    owner_email = _get_user_email(user_id) or "Someone"
+    threading.Thread(
+        target=_send_invite_email,
+        args=(email, f"{owner_email}'s Family Album", invite_link, role),
+        daemon=True,
+    ).start()
+
+    return row
+
+
+def update_family_member_role(
+    user_id: str,
+    record_id: str,
+    role: str,
+    supabase: SupabaseDB,
+) -> dict:
+    if role not in ("viewer", "contributor"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role must be 'viewer' or 'contributor'")
+    rows = supabase.select("family_members", filters={"id": record_id, "owner_id": user_id})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family member not found")
+    result = supabase.update("family_members", values={"role": role}, filters={"id": record_id})
+    row = result[0]
+    row["invite_link"] = f"{settings.FRONTEND_URL}/family-invite/{row['token']}"
+    row["email"] = _get_user_email(row["member_id"]) if row.get("member_id") else None
+    return row
+
+
+def remove_family_member(user_id: str, record_id: str, supabase: SupabaseDB) -> None:
+    rows = supabase.select("family_members", filters={"id": record_id, "owner_id": user_id})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family member not found")
+    supabase.delete("family_members", filters={"id": record_id})
+
+
+def get_family_invite_preview(token: str, supabase: SupabaseDB) -> dict:
+    """Public — returns owner display name + role without leaking invited_email."""
+    rows = supabase.select("family_members", filters={"token": token})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    fm = rows[0]
+    owner_email = _get_user_email(fm["owner_id"]) or "A family member"
+    return {
+        "owner_name": owner_email,
+        "role": fm["role"],
+        "status": fm["status"],
+    }
+
+
+def accept_family_invite(user_id: str, token: str, supabase: SupabaseDB) -> dict:
+    rows = supabase.select("family_members", filters={"token": token})
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    fm = rows[0]
+
+    if fm["status"] == "revoked":
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invite has been revoked")
+    if fm["status"] == "accepted":
+        return fm  # idempotent
+
+    result = supabase.update(
+        "family_members",
+        values={"member_id": user_id, "status": "accepted"},
+        filters={"id": fm["id"]},
+    )
+    return result[0]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
