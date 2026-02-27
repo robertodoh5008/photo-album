@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str
     AWS_REGION: str = "us-east-2"
     S3_BUCKET_NAME: str
-    SMTP_USER: str = ""      # Gmail address to send invites from
-    SMTP_PASSWORD: str = ""  # Gmail App Password (not your login password)
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = "Family Album <onboarding@resend.dev>"
 
     class Config:
         env_file = ".env"

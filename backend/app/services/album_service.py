@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import smtplib
+import threading
 from fastapi import HTTPException, status
 import httpx
+import resend
 
 from app.schemas.albums import (
     AlbumCreateRequest,
@@ -94,38 +93,33 @@ def _auto_accept_pending_invites(user_id: str, email: str, supabase: SupabaseDB)
 
 
 def _send_invite_email(to_email: str, album_name: str, invite_link: str, role: str) -> None:
-    """Send invite email via Gmail SMTP. Silently skips if SMTP_USER is not configured."""
-    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
+    """Send invite email via Resend. Silently skips if RESEND_API_KEY is not configured."""
+    if not settings.RESEND_API_KEY:
         return
     try:
         action = "view" if role == "viewer" else "view and upload photos to"
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"You've been invited to \"{album_name}\""
-        msg["From"] = settings.SMTP_USER
-        msg["To"] = to_email
-
-        text = (
-            f"You've been invited to {action} the album \"{album_name}\" on Family Album.\n\n"
-            f"Click the link below to accept your invitation:\n{invite_link}\n\n"
-            f"This invite expires in 7 days.\n"
-            f"If you were not expecting this invite, you can ignore this email."
-        )
-        html = (
-            f"<div style=\"font-family:sans-serif;max-width:480px;margin:auto;padding:32px\">"
-            f"<h2 style=\"color:#111\">You've been invited</h2>"
-            f"<p>You've been invited to {action} the album <strong>\"{album_name}\"</strong> on Family Album.</p>"
-            f"<p style=\"margin:32px 0\">"
-            f"<a href=\"{invite_link}\" style=\"background:#7c3aed;color:white;padding:14px 28px;border-radius:9999px;text-decoration:none;font-weight:600\">Accept Invite</a>"
-            f"</p>"
-            f"<p style=\"color:#6b7280;font-size:13px\">This invite expires in 7 days. If you were not expecting this, you can ignore this email.</p>"
-            f"</div>"
-        )
-        msg.attach(MIMEText(text, "plain"))
-        msg.attach(MIMEText(html, "html"))
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.SMTP_USER, to_email, msg.as_string())
+        resend.api_key = settings.RESEND_API_KEY
+        resend.Emails.send({
+            "from": settings.RESEND_FROM_EMAIL,
+            "to": [to_email],
+            "subject": f"You've been invited to \"{album_name}\"",
+            "text": (
+                f"You've been invited to {action} the album \"{album_name}\" on Family Album.\n\n"
+                f"Click the link below to accept your invitation:\n{invite_link}\n\n"
+                f"This invite expires in 7 days.\n"
+                f"If you were not expecting this invite, you can ignore this email."
+            ),
+            "html": (
+                f"<div style=\"font-family:sans-serif;max-width:480px;margin:auto;padding:32px\">"
+                f"<h2 style=\"color:#111\">You've been invited</h2>"
+                f"<p>You've been invited to {action} the album <strong>\"{album_name}\"</strong> on Family Album.</p>"
+                f"<p style=\"margin:32px 0\">"
+                f"<a href=\"{invite_link}\" style=\"background:#7c3aed;color:white;padding:14px 28px;border-radius:9999px;text-decoration:none;font-weight:600\">Accept Invite</a>"
+                f"</p>"
+                f"<p style=\"color:#6b7280;font-size:13px\">This invite expires in 7 days. If you were not expecting this, you can ignore this email.</p>"
+                f"</div>"
+            ),
+        })
     except Exception as e:
         print(f"Email send failed (invite still created): {e}")
 
@@ -353,7 +347,11 @@ def create_invite(
     invite_link = f"{settings.FRONTEND_URL}/invite/{invite['token']}"
     invite["invite_link"] = invite_link
 
-    _send_invite_email(data.email, album["name"], invite_link, data.role)
+    threading.Thread(
+        target=_send_invite_email,
+        args=(data.email, album["name"], invite_link, data.role),
+        daemon=True,
+    ).start()
 
     return invite
 
