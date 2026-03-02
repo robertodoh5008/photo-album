@@ -109,6 +109,21 @@ def _auto_accept_pending_invites(user_id: str, email: str, supabase: SupabaseDB)
             values={"member_id": user_id, "status": "accepted"},
             filters={"id": fm["id"]},
         )
+        # Create reverse record so the original inviter can also see this user's albums
+        owner_id = fm["owner_id"]
+        existing_reverse = supabase.select(
+            "family_members",
+            filters={"owner_id": user_id, "member_id": owner_id},
+        )
+        if not existing_reverse:
+            owner_email = _get_user_email(owner_id) or ""
+            supabase.insert("family_members", {
+                "owner_id": user_id,
+                "member_id": owner_id,
+                "invited_email": owner_email,
+                "role": fm["role"],
+                "status": "accepted",
+            })
 
 
 def _send_invite_email(to_email: str, album_name: str, invite_link: str, role: str) -> None:
@@ -617,7 +632,17 @@ def remove_family_member(user_id: str, record_id: str, supabase: SupabaseDB) -> 
     rows = supabase.select("family_members", filters={"id": record_id, "owner_id": user_id})
     if not rows:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Family member not found")
+    member_id = rows[0].get("member_id")
     supabase.delete("family_members", filters={"id": record_id})
+
+    # Also remove the reverse record to fully disconnect both directions
+    if member_id:
+        reverse_rows = supabase.select(
+            "family_members",
+            filters={"owner_id": member_id, "member_id": user_id},
+        )
+        for reverse in reverse_rows:
+            supabase.delete("family_members", filters={"id": reverse["id"]})
 
 
 def get_family_invite_preview(token: str, supabase: SupabaseDB) -> dict:
@@ -650,7 +675,25 @@ def accept_family_invite(user_id: str, token: str, supabase: SupabaseDB) -> dict
         values={"member_id": user_id, "status": "accepted"},
         filters={"id": fm["id"]},
     )
-    return result[0]
+    accepted_fm = result[0]
+
+    # Create reverse record so the original inviter can also see the accepter's albums
+    owner_id = fm["owner_id"]
+    existing_reverse = supabase.select(
+        "family_members",
+        filters={"owner_id": user_id, "member_id": owner_id},
+    )
+    if not existing_reverse:
+        owner_email = _get_user_email(owner_id) or ""
+        supabase.insert("family_members", {
+            "owner_id": user_id,
+            "member_id": owner_id,
+            "invited_email": owner_email,
+            "role": fm["role"],
+            "status": "accepted",
+        })
+
+    return accepted_fm
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
