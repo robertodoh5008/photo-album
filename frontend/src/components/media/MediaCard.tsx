@@ -41,23 +41,18 @@ export function MediaCard({ item, onSelect, onDelete }: MediaCardProps) {
         </div>
       )}
 
-      {/* Delete button */}
+      {/* Delete button — always visible so touch devices can tap it */}
       <button
         onClick={(e) => {
           e.stopPropagation();
           onDelete(item);
         }}
-        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
+        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-red-500 transition-colors"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
-
-      {/* Type badge */}
-      <div className="absolute bottom-2 left-2 px-2 py-1 rounded-full bg-black/50 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity">
-        {item.type === "image" ? "Photo" : "Video"}
-      </div>
     </div>
   );
 }

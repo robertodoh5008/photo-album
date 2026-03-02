@@ -97,19 +97,6 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
           </div>
         )}
 
-        {/* Prev button */}
-        {selectedIndex !== null && selectedIndex > 0 && (
-          <button
-            onClick={(e) => { e.stopPropagation(); handlePrev(); }}
-            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-14 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
-            aria-label="Previous"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-          </button>
-        )}
-
         {/* Media content */}
         {selectedItem?.type === "video" ? (
           <VideoPlayer src={selectedItem.view_url} />
@@ -121,11 +108,24 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
           />
         ) : null}
 
-        {/* Next button */}
+        {/* Prev button — inside the frame so it's reachable on mobile */}
+        {selectedIndex !== null && selectedIndex > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); handlePrev(); }}
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
+            aria-label="Previous"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+        )}
+
+        {/* Next button — inside the frame so it's reachable on mobile */}
         {selectedIndex !== null && selectedIndex < items.length - 1 && (
           <button
             onClick={(e) => { e.stopPropagation(); handleNext(); }}
-            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-14 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/80 transition-colors"
             aria-label="Next"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
