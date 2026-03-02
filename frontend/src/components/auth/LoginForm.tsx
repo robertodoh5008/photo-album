@@ -25,8 +25,8 @@ export function LoginForm() {
       if (error) {
         setError(error.message);
       } else {
-        setMessage("Check your email to confirm your account, then sign in.");
-        setIsSignUp(false);
+        const redirectTo = searchParams.get("redirectTo") || "/gallery";
+        router.push(redirectTo);
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({
