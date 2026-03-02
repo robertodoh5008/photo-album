@@ -51,6 +51,20 @@ def generate_presigned_view_url(s3_key: str) -> str:
     )
 
 
+def generate_presigned_download_url(s3_key: str, filename: str) -> str:
+    s3 = get_s3_client()
+    safe_filename = filename.replace('"', "")
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.S3_BUCKET_NAME,
+            "Key": s3_key,
+            "ResponseContentDisposition": f'attachment; filename="{safe_filename}"',
+        },
+        ExpiresIn=300,
+    )
+
+
 def delete_s3_object(s3_key: str) -> None:
     s3 = get_s3_client()
     s3.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)

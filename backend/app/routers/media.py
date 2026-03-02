@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.dependencies import get_current_user
 from app.schemas.media import MediaResponse, MediaCreateRequest
-from app.services.media_service import create_media, list_media, delete_media
+from app.services.media_service import create_media, list_media, delete_media, get_download_url
 from app.utils.supabase_client import get_supabase_admin
 
 router = APIRouter()
@@ -24,6 +24,15 @@ def save_media(
 ):
     supabase = get_supabase_admin()
     return create_media(user_id, body, supabase)
+
+
+@router.get("/{media_id}/download")
+def download_media(
+    media_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    supabase = get_supabase_admin()
+    return get_download_url(user_id, media_id, supabase)
 
 
 @router.delete("/{media_id}", status_code=204)

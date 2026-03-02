@@ -5,6 +5,7 @@ import { MediaItem } from "@/types";
 import { MediaCard } from "./MediaCard";
 import { VideoPlayer } from "./VideoPlayer";
 import { Modal } from "@/components/ui/Modal";
+import { apiFetch } from "@/lib/api";
 
 interface MediaGridProps {
   items: MediaItem[];
@@ -13,6 +14,17 @@ interface MediaGridProps {
 
 export function MediaGrid({ items, onDelete }: MediaGridProps) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = useCallback(async (item: MediaItem) => {
+    setDownloading(true);
+    try {
+      const { download_url } = await apiFetch<{ download_url: string }>(`/media/${item.id}/download`);
+      window.location.href = download_url;
+    } finally {
+      setDownloading(false);
+    }
+  }, []);
 
   const selectedItem = selectedIndex !== null ? items[selectedIndex] : null;
 
@@ -65,10 +77,23 @@ export function MediaGrid({ items, onDelete }: MediaGridProps) {
         isOpen={selectedIndex !== null}
         onClose={() => setSelectedIndex(null)}
       >
-        {/* Counter */}
+        {/* Counter + Download */}
         {selectedIndex !== null && (
-          <div className="absolute -top-10 left-0 text-white/70 text-sm">
-            {selectedIndex + 1} / {items.length}
+          <div className="absolute -top-10 left-0 flex items-center gap-4">
+            <span className="text-white/70 text-sm">
+              {selectedIndex + 1} / {items.length}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleDownload(items[selectedIndex]); }}
+              disabled={downloading}
+              className="flex items-center gap-1.5 text-white/70 hover:text-white transition-colors text-sm disabled:opacity-50"
+              title="Download"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              {downloading ? "Downloading…" : "Download"}
+            </button>
           </div>
         )}
 
